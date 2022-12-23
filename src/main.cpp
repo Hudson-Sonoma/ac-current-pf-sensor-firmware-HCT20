@@ -2,12 +2,17 @@
 #include <Wire.h>
 #include <Logic.h>
 #include <Event.h>
-#include <twi_log.h>
 #include <checksum.hpp>
 #include <sampling.hpp>
 #include <hardware.hpp>
 
-// Calibrate using a know resistive load, this value could be 0 to SAMPLES_PER_60HZ_CYCLE/2
+#ifdef TWI_LOGGING
+#include <twi_log.h>
+#else
+#define LOG_TWI(...) {}
+#endif
+
+// Calibrate using a known resistive load, this value could be 0 to SAMPLES_PER_60HZ_CYCLE/2
 #define PF_VOLTAGE_PHASE_CAL 60
 
 //  SUPPORTED COMMANDS from SHT20
@@ -20,10 +25,12 @@
 
 void receiveHandler(int numbytes);
 void requestHandler();
-//void twi_printlog( twi_trace_t * ttrace);
 void voltageSenseISR();
 void setupLogic();
-//uint8_t sht20_crc8(const uint8_t *data, uint8_t len);
+#ifdef TWI_LOGGING
+void twi_printlog( twi_trace_t * ttrace);
+#endif
+
 volatile uint8_t g_i2c_command;
 volatile uint16_t g_temperature;
 volatile uint16_t g_humidity;
@@ -80,10 +87,11 @@ void loop() {
   uint16_t Craw = chC.getRMS_RAW();
   uint16_t AMPSraw = Araw + Braw + Craw;
 
-  float temp = CALCS_FACTOR * Braw;//((float)AMPSraw)*CALCS_FACTOR;
+  // prepare data for I2C - SHT20 compatible, so we have a "temperature" and a "humidity" values, equal to RMS current and power factor respectively
+  float temp = CALCS_FACTOR * Braw;
   uint16_t phase_count = chB.get_phase_count();
   float degrees = ((float)phase_count - PF_VOLTAGE_PHASE_CAL)*(360.0/SAMPLES_PER_60HZ_CYCLE);
-  float pf = cos(degrees*(3.14159/180.0));     // phase_count - 80 for swapped LUT input
+  float pf = cos(degrees*(3.14159/180.0));     
   uint16_t temperatureRaw=(uint16_t)(((temp) + 46.85)*65536.0 / 175.72);
   uint16_t humidityRaw=(uint16_t)((fabs(pf)*100.0 + 6.0) * 65536.0 / 125.0 );
 
@@ -99,7 +107,9 @@ void loop() {
   Serial.print(" degrees:");Serial.print(degrees);
   Serial.print(" pf ");Serial.println(pf);
 
-  //twi_printlog(&_ttrace); // to Serial.
+#ifdef TWI_LOGGING
+  twi_printlog(&_ttrace); // to Serial.
+#endif
 
 }
 
@@ -151,7 +161,7 @@ void requestHandler()
 }
 
 
-
+#ifdef TWI_LOGGING
 void twi_printlog( twi_trace_t * ttrace) 
 {
     if (ttrace->count > 0) {
@@ -193,7 +203,7 @@ void twi_printlog( twi_trace_t * ttrace)
     }
 
 }
-
+#endif
 
 void setupLogic()
 {
@@ -209,12 +219,12 @@ void setupLogic()
   // put your setup code here, to run once:
   Logic0.enable = true;               // Enable logic block 0
   Logic0.input0 = in::masked;         // PA0 masked
-  Logic0.input1 = in::masked;            // PA1 TX1.  pin PA1 cannot be grounded or connected to a cap.  Make a loop of wire, PA2 - PA1 with 1M resistors.
-  Logic0.input2 = in::pin;         // PA2 RX1 masked
-  Logic0.output = out::disable;        // Enable logic block 0 output pin PA4 (ATtiny3224))
+  Logic0.input1 = in::masked;         // PA1 TX1 masked
+  Logic0.input2 = in::pin;            // PA2 RX1 voltage sense
+  Logic0.output = out::disable;       // Enable logic block 0 output pin PA4 (ATtiny3224))
   Logic0.filter = filter::disable;    // No output filter enabled
   Logic0.truth = 0x01;                // Set truth table - HIGH only if input low
-  //Logic0.truth = 0x02;                // Set truth table - HIGH only if input HIGH
+  //Logic0.truth = 0x02;              // Set truth table - HIGH only if input HIGH
   Logic0.edgedetect = edgedetect::enable;       // Enable edge detection
   Logic0.attachInterrupt(&voltageSenseISR,CHANGE);
   Logic0.init();
@@ -244,44 +254,5 @@ void voltageSenseISR()
   }
 
 }
-
-
-/*
-Power factor can be numerically calculated from time-series of voltage and current measurements.  Assume an array of 256 voltage measurements named Varr, and an array of 256 current measurements named Iarr.
-*/
-
-// void calc_power_factor()
-// {
-
-// // Calculate the power factor
-// float pf = 0;
-// float sumP = 0;
-// float sumS = 0;
-// for (int i = 0; i < 256; i++) {
-//   sumP += Varr[i] * Iarr[i];
-//   sumS += Varr[i] * Varr[i] + Iarr[i] * Iarr[i];
-// }
-// pf = sumP / sqrt(sumS);
-
-// }
-
-
-// float calcPowerFactor(float Varr[], float Aarr[], int len)
-// {
-//     // Initialize variables
-//     float apparent_power = 0;
-//     float reactive_power = 0;
-
-//     // Loop through the arrays and calculate apparent and reactive power
-//     for (int i = 0; i < len; i++)
-//     {
-//         apparent_power += Varr[i] * Aarr[i];
-//         reactive_power += Varr[i] * Aarr[i] * sin(atan2(Aarr[i], Varr[i]));
-//     }
-
-//     // Calculate and return power factor
-//     return apparent_power / reactive_power;
-// }
-
 
 
